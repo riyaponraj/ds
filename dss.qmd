@@ -76,8 +76,7 @@ datasets["LA"].head()
 datasets["LA"].columns
 ```
 
-### Data Cleaning and Summary Statistics
-This will show the summary of each city's data from Airbnb
+### Data Cleaning 
 ```{python}
 #| code-fold: true
 #| code-summary: "Show Code"
