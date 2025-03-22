@@ -115,17 +115,8 @@ for name, df in datasets_cleaned.items():
     saved_paths[name] = path
 
 saved_paths
-for name, df in datasets_cleaned.items():
-    city = name.split("_")[-1]  
-    print(f"Sample Data: {city} ")
-    display(df[:1])  
-    print("\n" + "="*200 + "\n")
 
-for name, df in datasets_cleaned.items():
-    city = name.split("_")[-1]
-    print(f"Dataset: {city} - Summary Statistics")
-    display(df.describe())  
-    print("\n" + "="*200 + "\n")
+
 
 ```
 
