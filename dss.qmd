@@ -54,8 +54,7 @@ from sklearn.neighbors import KNeighborsRegressor
 ### Data Collection:
 I have collected the data from Airbnb. This is how data looks like
 ```{python}
-#| code-fold: true
-#| code-summary: "Show Code"
+#| echo: false
 file_paths = [
     "D:\DS Assignment\Data\LA.csv",
     "D:\DS Assignment\Data\Pdx.csv",
@@ -69,7 +68,7 @@ datasets.keys()
 datasets["LA"].head() 
 ```
 
-##### Columns List
+#### Columns List
 ```{python}
 #| code-fold: true
 #| code-summary: "Show Code"
@@ -78,8 +77,7 @@ datasets["LA"].columns
 
 ### Data Cleaning 
 ```{python}
-#| code-fold: true
-#| code-summary: "Show Code"
+#| echo: false
 def clean_airbnb_data(df):
     cols_to_drop = ['source', 'id', 'host_id', 'scrape_id', 'last_scraped', 'listing_url', 'thumbnail_url', 'medium_url',
                     'picture_url', 'xl_picture_url', 'host_url', 'host_thumbnail_url', 'host_picture_url']
@@ -122,8 +120,7 @@ saved_paths
 ### Data preprocessing
 1) I have encoded categorical features. Categorical variables like room_type, neighbourhood, and property_type were one-hot encoded. 
 ```{python}
-#| code-fold: true
-#| code-summary: "Show Code"
+#| echo: false
 def encode_categorical(df):
     categorical_cols = ['room_type', 'neighbourhood', 'property_type']
     df = pd.get_dummies(df, columns=[col for col in categorical_cols if col in df.columns], drop_first=True)
@@ -144,8 +141,7 @@ datasets_encoded['LA'].columns.tolist()[:20]
 ### Handling Outliers
  Outliers in price, bedrooms, and bathrooms were removed using the Interquartile Range method. Listings outside 1.5×IQR from Q1 and Q3 were filtered out. This helped me reduced skew and improve model stability.
 ```{python}
-#| code-fold: true
-#| code-summary: "Show Code"
+#| echo: false
 def remove_outliers_iqr(df, column):
     Q1 = df[column].quantile(0.25)
     Q3 = df[column].quantile(0.75)
@@ -175,14 +171,15 @@ outlier_summary
 
 ### Exploratory Data Analysis using Visualizations
 ```{python}
-#| code-fold: true
-#| code-summary: "Show Code"
+#| echo: false
 df = pd.read_csv("cleaned_airbnb_data.csv")
 
 df.shape, df.columns
 
 df.head()
 ```
+
+
 **Visualization 1: Price Distribution for overall dataset(All cities)** 
 
 
@@ -197,6 +194,8 @@ plt.title("Price Distribution (Capped at $1000)")
 plt.show()
 
 ```
+
+
 **Visualization 2: City Based visualization for Prize Distribution** 
 
 I used boxplot to compare the price distributions across individual cities. San Francisco and Los Angeles exhibit higher median prices and wider interquartile ranges, indicating more variability and a higher overall cost of listings. In contrast, we can see that cities like Salem and Portland show tighter distributions and lower medians, reflect more budget-friendly markets. 
@@ -217,6 +216,7 @@ sns.despine()
 plt.tight_layout()
 plt.show()
 ```
+
 
 **Visualization 3: Comparison of Price vs Accomodates** 
 
@@ -244,6 +244,8 @@ sns.despine()
 plt.tight_layout()
 plt.show()
 ```
+
+
 **Visualization 4: Review Score vs Price for overall city(Higher the reviews scores, higher the rentals)** 
 
 This scatter plot examines the relationship between listing price and review scores across all cities.
@@ -284,6 +286,8 @@ g.fig.subplots_adjust(top=0.9)
 g.fig.suptitle("Review Score Rating vs Price by City")
 plt.show()
 ```
+
+
 **Visualization 6: Minimum Nights spent** 
 
 This boxplot highlights the distribution of the minimum_nights variable across all listings.
