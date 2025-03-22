@@ -1,0 +1,974 @@
+---
+title: "CS 670 Data Science Project"
+author: "Riya Ponraj"
+output: 
+  html:
+    code-fold: true
+---
+
+## Introduction
+
+This dataset provides detailed information about Airbnb listings in various West Coast cities, including Seattle, Los Angeles, San Francisco, Portland, and Salem. Sourced from publicly available data on the Inside Airbnb platform, it includes approximately 75 attributes per listing. These attributes encompass a wide range of information, such as pricing, location, room type, host details, review counts, and available amenities. The dataset includes both quantitative variables (e.g., listing price, number of reviews) and categorical variables (e.g., room type, neighborhood), making it a rich resource for various types of analyses.
+
+The main purpose of Inside Airbnb is to increase transparency around Airbnb’s impact on housing markets, neighborhoods, and local economies.
+
+The data is gathered by scraping Airbnb’s website. Inside Airbnb uses custom web scraping scripts to collect detailed information about all available listings in a given city on a specific date.
+
+Data Source: [Inside Airbnb](http://insideairbnb.com/)  
+
+
+
+## Code Setup
+#### Import the Required Libraries
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+import plotly.express as px
+import plotly.graph_objects as go
+from scipy.stats import zscore
+import os
+from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import OneHotEncoder, LabelEncoder
+from sklearn.preprocessing import MinMaxScaler
+import statsmodels.api as sm
+
+from sklearn.linear_model import LinearRegression, LassoCV, RidgeCV
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.metrics import pairwise_distances
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import GridSearchCV
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+from sklearn.neighbors import KNeighborsRegressor
+```
+
+### Data Collection:
+I have collected the data from Airbnb. This is how data looks like
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+file_paths = [
+    "D:\DS Assignment\Data\LA.csv",
+    "D:\DS Assignment\Data\Pdx.csv",
+    "D:\DS Assignment\Data\Salem.csv",
+    "D:\DS Assignment\Data\Sea.csv",
+    "D:\DS Assignment\Data\SD.csv",
+    "D:\DS Assignment\Data\SF.csv"
+]
+datasets = {os.path.basename(path).split(".")[0]: pd.read_csv(path) for path in file_paths}
+datasets.keys()
+datasets["LA"].head() 
+```
+
+##### Columns List
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+datasets["LA"].columns
+```
+
+### Data Cleaning and Summary Statistics
+This will show the summary of each city's data from Airbnb
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+def clean_airbnb_data(df):
+    cols_to_drop = ['source', 'id', 'host_id', 'scrape_id', 'last_scraped', 'listing_url', 'thumbnail_url', 'medium_url',
+                    'picture_url', 'xl_picture_url', 'host_url', 'host_thumbnail_url', 'host_picture_url']
+    df.drop(columns=[col for col in cols_to_drop if col in df.columns], inplace=True, errors='ignore')
+
+    if 'price' in df.columns:
+        df['price'] = df['price'].astype(str)
+        df['price'] = df['price'].str.replace(r'[\$,]', '', regex=True)
+        df['price'] = pd.to_numeric(df['price'], errors='coerce')
+
+    df.fillna({
+        'price': df['price'].median() if 'price' in df.columns else np.nan,
+        'review_scores_rating': df['review_scores_rating'].mean() if 'review_scores_rating' in df.columns else np.nan,
+        'bedrooms': df['bedrooms'].mode()[0] if 'bedrooms' in df.columns else np.nan,
+        'bathrooms': df['bathrooms'].mode()[0] if 'bathrooms' in df.columns else np.nan,
+    }, inplace=True)
+
+    bool_columns = [col for col in df.columns if df[col].dtype == object and df[col].nunique() == 2]
+    for col in bool_columns:
+        df[col] = df[col].map({'t': 1, 'f': 0})
+
+    df.drop_duplicates(inplace=True)
+
+    return df
+
+datasets_cleaned = {name: clean_airbnb_data(df.copy()) for name, df in datasets.items()}
+
+saved_paths = {}
+for name, df in datasets_cleaned.items():
+    path = f"cleaned_{name}.csv"
+    df.to_csv(path, index=False)
+    saved_paths[name] = path
+
+saved_paths
+for name, df in datasets_cleaned.items():
+    city = name.split("_")[-1]  
+    print(f"Sample Data: {city} ")
+    display(df[:1])  
+    print("\n" + "="*200 + "\n")
+
+for name, df in datasets_cleaned.items():
+    city = name.split("_")[-1]
+    print(f"Dataset: {city} - Summary Statistics")
+    display(df.describe())  
+    print("\n" + "="*200 + "\n")
+
+```
+
+### Data preprocessing
+1) I have encoded categorical features
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+def encode_categorical(df):
+    categorical_cols = ['room_type', 'neighbourhood', 'property_type']
+    df = pd.get_dummies(df, columns=[col for col in categorical_cols if col in df.columns], drop_first=True)
+
+    ordinal_cols = ['host_is_superhost']
+    for col in ordinal_cols:
+        if col in df.columns:
+            df[col] = df[col].map({'t': 1, 'f': 0})
+
+    return df
+
+datasets_encoded = {name: encode_categorical(df.copy()) for name, df in datasets_cleaned.items()}
+
+datasets_encoded['LA'].columns.tolist()[:20]  
+
+```
+
+### Handling Outliers
+Outliers are removed using Interquartile Range
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+def remove_outliers_iqr(df, column):
+    Q1 = df[column].quantile(0.25)
+    Q3 = df[column].quantile(0.75)
+    IQR = Q3 - Q1
+    lower = Q1 - 1.5 * IQR
+    upper = Q3 + 1.5 * IQR
+    return df[(df[column] >= lower) & (df[column] <= upper)]
+
+columns_to_check = ['price', 'bedrooms', 'bathrooms']
+
+datasets_no_outliers = {}
+for name, df in datasets_encoded.items():
+    df_cleaned = df.copy()
+    for col in columns_to_check:
+        if col in df_cleaned.columns:
+            df_cleaned = remove_outliers_iqr(df_cleaned, col)
+    datasets_no_outliers[name] = df_cleaned
+
+outlier_summary = pd.DataFrame({
+    'Dataset': datasets_encoded.keys(),
+    'Before': [datasets_encoded[name].shape[0] for name in datasets_encoded],
+    'After': [datasets_no_outliers[name].shape[0] for name in datasets_encoded]
+})
+
+outlier_summary
+```
+
+### Exploratory Data Analysis using Visualizations
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+df = pd.read_csv("cleaned_airbnb_data.csv")
+
+df.shape, df.columns
+
+df.head()
+```
+**Visualization 1: Price Distribution for overall dataset(All cities)** 
+
+
+The histogram shows the overall distribution of Airbnb listing prices across all cities. Most listings are concentrated below $500, with a sharp right-skew indicating a long tail of higher-priced properties. To reduce distortion from extreme values, the x-axis is capped at $1000. This reveals that the majority of listings fall within a moderate price range, making it more interpretable.
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+plt.figure(figsize=(8, 5))
+sns.histplot(df['price'], bins=100, kde=True)
+plt.xlim(0, 1000)
+plt.title("Price Distribution (Capped at $1000)")
+plt.show()
+
+```
+**Visualization 2: City Based visualization for Prize Distribution** 
+
+The boxplot compares the price distributions across individual cities. San Francisco and Los Angeles exhibit higher median prices and wider interquartile ranges, indicating more variability and a higher overall cost of listings. In contrast, cities like Salem and Portland show tighter distributions and lower medians, reflecting more budget-friendly markets. Outliers are present in all cities, especially in high-demand urban areas, and should be handled carefully during modeling.
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+plt.figure(figsize=(12, 6))
+
+sns.boxplot(data=df, x="city", y="price", palette="Set2")
+
+plt.title("Airbnb Price Distribution by City (Boxplot)", fontsize=16, weight='bold')
+plt.xlabel("City", fontsize=12)
+plt.ylabel("Price ($)", fontsize=12)
+plt.xticks(rotation=45)
+plt.grid(axis='y', linestyle='--', alpha=0.5)
+
+sns.despine()  
+plt.tight_layout()
+plt.show()
+```
+
+**Visualization 3: Comparison of Price vs Accomodates** 
+
+This boxplot explores how listing prices vary with the number of guests a property can accommodate, focusing on listings that host up to 10 guests.
+
+We observe a clear upward trend in median price as the number of accommodated guests increases. Listings that can host more people typically charge higher prices, which aligns with expectations — larger properties often offer more space, amenities, or multiple rooms.
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+plt.figure(figsize=(10, 6))
+
+sns.boxplot(
+    x='accommodates',
+    y='price',
+    data=df[df['accommodates'] <= 10],
+    palette="husl"
+)
+
+plt.title(' Price vs Number of Guests Accommodated', fontsize=15, weight='bold')
+plt.xlabel('Accommodates', fontsize=12)
+plt.ylabel('Price ($)', fontsize=12)
+plt.grid(axis='y', linestyle='--', alpha=0.4)
+
+sns.despine()
+plt.tight_layout()
+plt.show()
+```
+**Visualization 4: Review Score vs Price for overall city(Higher the reviews scores, higher the rentals)** 
+
+This scatter plot examines the relationship between listing price and review scores across all cities.
+
+We observe that most listings cluster between review scores of 80 and 100, with prices primarily concentrated below $500. While higher review scores may suggest better listing quality, there is no strong linear relationship between review scores and price. High-priced listings exist across all score ranges, and high review scores are not exclusive to expensive listings.
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+plt.figure(figsize=(8, 5))
+sns.scatterplot(data=df, x='review_scores_rating', y='price', alpha=0.4)
+plt.title('Review Score Rating vs Price')
+plt.xlabel('Review Score')
+plt.ylabel('Price ($)')
+plt.tight_layout()
+plt.show()
+```
+
+
+
+**Visualization 5: review score rating vs Price by city** 
+
+Across most cities, we observe a dense cluster of listings with high review scores (above 85) and moderate prices (under $300). This indicates that a good guest experience does not necessarily correlate with high listing prices. In cities like San Francisco and Los Angeles, we see a broader spread of prices — especially in the higher range — even for similarly rated listings. This reflects the impact of local market dynamics and demand.
+
+Overall, the pattern reinforces that while high review scores are important for guest satisfaction, they are not the sole determinant of listing price. City-specific factors play a major role in shaping the pricing landscape.
+
+
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+df2 = df[['city', 'price', 'review_scores_rating']].dropna()
+df2 = df2[df2['price'].between(10, 1000)]
+
+# Plot: Review Scores vs Price, Faceted by City
+g = sns.FacetGrid(df2, col="city", col_wrap=3, height=4, sharex=True, sharey=True)
+g.map(sns.scatterplot, "review_scores_rating", "price", alpha=0.4)
+g.set_axis_labels("Review Score", "Price ($)")
+g.fig.subplots_adjust(top=0.9)
+g.fig.suptitle("Review Score Rating vs Price by City")
+plt.show()
+```
+**Visualization 6: Minimum Nights spent** 
+
+This boxplot highlights the distribution of the minimum_nights variable across all listings.
+
+We can clearly see the presence of extreme outliers on the right side, with some listings requiring unusually long minimum stays. While the majority of listings have a minimum night requirement below 30 days, a small number have values that stretch well beyond typical short-term rental expectations (e.g., 100+ nights), likely skewing the distribution.
+
+**Overall Findings:**
+
+Most Airbnb listings across all cities have a reasonable minimum night stay — typically between 1 and 7 nights — aligning with short-term rental behavior. However, a small number of listings set extremely high minimum night thresholds (e.g., 60+, even 365), which are clear outliers and likely reflect special cases such as long-term rentals or misconfigured listings.
+
+These outliers can distort the distribution and influence model performance, so applying caps (e.g., filtering out listings with minimum_nights > 30) is necessary to maintain modeling accuracy and data quality.
+
+### Preparing Engineered data for Models 
+
+Columns (mostly numerical required for regression models to predict price)
+
+This cleaned and feature-engineered dataset significantly improves model readiness by:
+
+Removing noisy or skewed data points
+
+Capturing meaningful business logic (e.g., shared vs. private rooms)
+
+Creating derived features that may improve prediction power
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+columns_to_keep = [
+    'price', 'accommodates', 'minimum_nights', 'maximum_nights', 'bedrooms', 'beds', 'bathrooms_text',
+    'number_of_reviews', 'reviews_per_month', 'availability_30', 'availability_60','availability_90', 'availability_365' ,'review_scores_rating', 'instant_bookable',
+    'room_type_Private room', 'room_type_Hotel room', 'city'
+]
+df1 = df[columns_to_keep].copy()
+
+df1.dropna(subset=['price', 'accommodates', 'bedrooms',  'review_scores_rating'], inplace=True)
+
+df1 = df1[df1['price'].between(10, 1000)]
+df1 = df1[df1['minimum_nights'] <= 365]
+df1 = df1[df1['bedrooms'] <= 10]
+
+df1['bathrooms'] = df1['bathrooms_text'].str.extract(r'([\d\.]+)').astype(float)
+df1.drop(columns=['bathrooms_text'], inplace=True)
+
+df1['log_price'] = np.log1p(df1['price'])
+
+df1['reviews_total'] = df1['number_of_reviews'] * df1['reviews_per_month']
+
+df1['price_per_person'] = df1['price'] / df1['accommodates']
+df1.replace([np.inf, -np.inf], np.nan, inplace=True)
+
+df1['is_shared'] = (df1['room_type_Private room'] | df1['room_type_Hotel room']).astype(int)
+
+df1 = pd.get_dummies(df1, columns=['city'], drop_first=False)
+
+df1.dropna(inplace=True)
+df1
+```
+
+
+**Correlation**
+Finding the correlation between the features
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+X_corr = df1.drop(columns=["price", "log_price"])
+
+X_corr = X_corr.loc[:, ~X_corr.columns.str.startswith("city_")]
+
+corr_matrix = X_corr.corr()
+
+plt.figure(figsize=(12, 8))
+sns.heatmap(corr_matrix, annot=True, cmap="coolwarm", fmt=".2f")
+plt.title(" Correlation Between Features (Excluding City Dummies)")
+plt.tight_layout()
+plt.show()
+
+```
+
+**Correlation for Individual cities** 
+
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+
+
+# Identify city columns
+city_cols = [col for col in df1.columns if col.startswith("city_")]
+
+for city_col in city_cols:
+    df_city = df1[df1[city_col] == 1].copy()
+    
+    if len(df_city) < 100:  # optional filter to skip small samples
+        print(f"⏭️ Skipping {city_col.replace('city_', '')} (too few rows)")
+        continue
+
+    # Drop city columns
+    df_city_cleaned = df_city.drop(columns=[col for col in df_city.columns if col.startswith("city_") or col in ['price', 'log_price']])
+
+    # Compute correlation
+    corr_matrix = df_city_cleaned.corr()
+
+    # Plot
+    plt.figure(figsize=(12, 8))
+    sns.heatmap(corr_matrix, annot=True, cmap="coolwarm", fmt=".2f")
+    plt.title(f"🔍 Feature Correlation - {city_col.replace('city_', '')}")
+    plt.tight_layout()
+    plt.show()
+
+
+```
+From this, we can infer that bedrooms, reviews are highly correlated with other features. However, the strength and nature of these relationships vary across cities, suggesting that a one-size-fits-all pricing model may not be optimal. Understanding city-specific correlations is key to building more accurate, localized predictive models.
+
+##### Datatypes
+```{python}
+df1.dtypes
+```
+### Machine Learning Models
+#### OLS Model
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+X = df1.drop(columns=["price", "log_price"])
+
+X = X.loc[:, X.dtypes != "bool"]
+
+X = X.apply(pd.to_numeric, errors="coerce")
+X = X.dropna()
+y = df1["log_price"].loc[X.index]
+
+X_const = sm.add_constant(X)
+model = sm.OLS(y, X_const).fit()
+
+print(model.summary())
+
+
+```
+**Summary of P Values**
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+summary_df = model.summary2().tables[1][['Coef.', 'P>|t|']]
+print(summary_df.sort_values("P>|t|")) 
+```
+**Inference:**  
+
+Highly Significant Predictors (p < 0.05):
+
+1)accommodates, bedrooms, and availability_30 are typically strong predictors of price
+
+2)price_per_person and review_scores_rating often show significance depending on the data
+
+#### Regression Model (Price Prediction)
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+X = df1.drop(columns=["price", "log_price"])
+y = df1["log_price"]
+X_scaled = StandardScaler().fit_transform(X)
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42, shuffle=True)
+
+lr = LinearRegression()
+lr.fit(X_train, y_train)
+y_pred_lr = lr.predict(X_test)
+
+lasso = LassoCV(cv=5, random_state=42)
+lasso.fit(X_train, y_train)
+y_pred_lasso = lasso.predict(X_test)
+
+ridge = RidgeCV(cv=5)
+ridge.fit(X_train, y_train)
+y_pred_ridge = ridge.predict(X_test)
+
+results_all = pd.DataFrame({
+    "Model": ["Linear Regression", "Lasso Regression", "Ridge Regression"],
+    "R² Score": [
+        r2_score(y_test, y_pred_lr),
+        r2_score(y_test, y_pred_lasso),
+        r2_score(y_test, y_pred_ridge)
+    ],
+    "RMSE": [
+        mean_squared_error(y_test, y_pred_lr),
+        mean_squared_error(y_test, y_pred_lasso),
+        mean_squared_error(y_test, y_pred_ridge)
+    ]
+})
+
+lasso_selected_features = pd.Series(lasso.coef_, index=X.columns)
+lasso_selected_features = lasso_selected_features[lasso_selected_features != 0].sort_values(ascending=False)
+
+print(" Model Performance (All Cities Combined)")
+print(results_all.to_string(index=False))
+
+print("\n Accuracy of each model (R² score as %):")
+for i, row in results_all.iterrows():
+    print(f"{row['Model']}: {row['R² Score'] * 100:.2f}%")
+
+
+print("\n Top Lasso-Selected Features (Non-zero coefficients):")
+print(lasso_selected_features.head(15).to_string())
+```
+
+Inference: Lasso regression seems to have performed better than the other two!
+
+##### For Individual cities 
+
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+city_results = []
+
+unique_cities = df1.columns[df1.columns.str.startswith("city_")]
+
+for city_col in unique_cities:
+    df_city = df1[df1[city_col] == 1].copy()
+
+    if len(df_city) < 100:
+        continue
+
+    X_city = df_city.drop(columns=["price", "log_price"] + list(unique_cities))
+    y_city = df_city["log_price"]
+
+    X_scaled = StandardScaler().fit_transform(X_city)
+    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_city, test_size=0.2, random_state=42)
+
+    lr = LinearRegression().fit(X_train, y_train)
+    lasso = LassoCV(cv=5, random_state=42).fit(X_train, y_train)
+    ridge = RidgeCV(cv=5).fit(X_train, y_train)
+
+    y_pred_lr = lr.predict(X_test)
+    y_pred_lasso = lasso.predict(X_test)
+    y_pred_ridge = ridge.predict(X_test)
+
+    city_results.append({
+        "City": city_col.replace("city_", ""),
+        "Model": "Linear",
+        "R²": r2_score(y_test, y_pred_lr),
+        "RMSE": mean_squared_error(y_test, y_pred_lr)
+    })
+    city_results.append({
+        "City": city_col.replace("city_", ""),
+        "Model": "Lasso",
+        "R²": r2_score(y_test, y_pred_lasso),
+        "RMSE": mean_squared_error(y_test, y_pred_lasso)
+    })
+    city_results.append({
+        "City": city_col.replace("city_", ""),
+        "Model": "Ridge",
+        "R²": r2_score(y_test, y_pred_ridge),
+        "RMSE": mean_squared_error(y_test, y_pred_ridge)
+    })
+
+results_df = pd.DataFrame(city_results)
+
+pivot_table = results_df.pivot(index="City", columns="Model", values=["R²", "RMSE"])
+
+print("\n Per-City Model Performance (R² and RMSE):\n")
+display(pivot_table.round(3))
+
+```
+Inference: These models cannot capture non-linear pattern
+#### KNN (Non Linearity)
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+knn = KNeighborsRegressor(n_neighbors=5)
+knn.fit(X_train, y_train)
+y_pred = knn.predict(X_test)
+r2 = r2_score(y_test, y_pred)
+rmse = mean_squared_error(y_test, y_pred)
+
+print("k-NN Regressor Performance:")
+print(f"R² Score: {r2:.3f}")
+print(f"RMSE: {rmse:.2f}")
+```
+
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+knn_city_results = []
+city_cols = [col for col in df1.columns if col.startswith("city_")]
+
+for city_col in city_cols:
+    df_city = df1[df1[city_col] == 1].copy()
+
+    if len(df_city) < 100:
+        print(f" Skipping {city_col.replace('city_', '')} (<200 listings)")
+        continue
+
+    X_city = df_city.drop(columns=["price", "log_price"] + city_cols)
+    y_city = df_city["price"]
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_city)
+
+
+    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_city, test_size=0.2, random_state=42,  shuffle=True)
+
+    knn = KNeighborsRegressor(n_neighbors=5)
+    knn.fit(X_train, y_train)
+    y_pred = knn.predict(X_test)
+
+    r2 = r2_score(y_test, y_pred)
+    rmse = mean_squared_error(y_test, y_pred)
+
+
+    knn_city_results.append({
+        "City": city_col.replace("city_", ""),
+        "Model": "k-NN",
+        "R²": round(r2, 3),
+        "RMSE": round(rmse, 2)
+    })
+
+
+knn_results_df = pd.DataFrame(knn_city_results).sort_values("R²", ascending=False)
+print("Per-City k-NN Model Performance:\n")
+print(knn_results_df.to_string(index=False))
+
+```
+
+**Inference:**
+Less data performs poorly when non-linear models are used. In this case, Salem has very less data. 
+
+##### Visualization of KNN (all data) 
+
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+
+plt.figure(figsize=(8, 6))
+sns.scatterplot(x=y_test, y=y_pred, alpha=0.5)
+plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], color='red', linestyle='--')
+plt.title(f"Predicted vs Actual Prices (Manual k-NN, k=4)")
+plt.xlabel("Actual Price")
+plt.ylabel("Predicted Price")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+```
+Inference: k-NN performance is sensitive to data density. Sparse datasets and high-dimensional spaces can degrade its effectiveness — highlighting the need for larger samples or dimensionality reduction in smaller cities.
+
+
+#### Random Forest Regressor 
+
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+X = df1.drop(columns=["price", "log_price"])
+y = df1["price"]
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+
+rf = RandomForestRegressor(
+    n_estimators=100,
+    max_depth=10,
+    min_samples_leaf=5,
+    max_features='sqrt',
+    random_state=42
+)
+rf.fit(X_train, y_train)
+
+y_pred_rf = rf.predict(X_test)
+
+r2_rf = r2_score(y_test, y_pred_rf)
+rmse_rf = mean_squared_error(y_test, y_pred_rf)
+
+print(" Random Forest Performance (Regularized)")
+print(f"R² Score: {r2_rf:.3f}")
+print(f"RMSE: {rmse_rf:.2f}")
+
+```
+Inference: Surprisingly, random forest regressor has better performance!
+Visualization:
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+plt.figure(figsize=(8, 6))
+sns.scatterplot(x=y_test, y=y_pred_rf, alpha=0.4)
+plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--')
+plt.title("Random Forest: Predicted vs Actual Price")
+plt.xlabel("Actual Price")
+plt.ylabel("Predicted Price")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+```
+
+Extracting Features:
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+feature_importance = pd.Series(rf.feature_importances_, index=X.columns).sort_values(ascending=False)
+print(" Top 10 Features:")
+print(feature_importance.head(10))
+
+plt.figure(figsize=(10, 5))
+sns.barplot(x=feature_importance.head(10), y=feature_importance.head(10).index)
+plt.title("Top 10 Feature Importances - Random Forest")
+plt.xlabel("Importance")
+plt.ylabel("Feature")
+plt.tight_layout()
+plt.show()
+
+```
+Choosing Best Parameters
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+X = df1.drop(columns=["price", "log_price"])
+y = df1["price"]
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+
+param_grid = {
+    "max_depth": [5, 10, 15],
+    "min_samples_leaf": [3, 5, 10],
+    "max_features": ["sqrt", "log2"]
+}
+
+rf = RandomForestRegressor(n_estimators=100, random_state=42)
+grid_search = GridSearchCV(rf, param_grid, cv=5, scoring="neg_root_mean_squared_error", n_jobs=-1)
+grid_search.fit(X_train, y_train)
+
+best_rf = grid_search.best_estimator_
+print(" Best Parameters:")
+print(grid_search.best_params_)
+
+y_pred_best_rf = best_rf.predict(X_test)
+
+r2_best = r2_score(y_test, y_pred_best_rf)
+rmse_best = mean_squared_error(y_test, y_pred_best_rf)
+
+print("\n Tuned Random Forest Performance")
+print(f"R² Score: {r2_best:.3f}")
+print(f"RMSE: {rmse_best:.2f}")
+
+```
+Doing it for individual cities:
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+
+param_grid = {
+    "max_depth": [5, 10, 15],
+    "min_samples_leaf": [3, 5, 10],
+    "max_features": ["sqrt", "log2"]
+}
+
+rf_city_results = []
+city_cols = [col for col in df1.columns if col.startswith("city_")]
+
+for city_col in city_cols:
+    df_city = df1[df1[city_col] == 1].copy()
+
+    if len(df_city) < 100:
+        print(f" Skipping {city_col.replace('city_', '')} (<100 rows)")
+        continue
+
+    X_city = df_city.drop(columns=["price", "log_price"] + city_cols)
+    y_city = df_city["price"]
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_city)
+
+    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_city, test_size=0.2, random_state=42)
+
+    # GridSearchCV
+    rf = RandomForestRegressor(n_estimators=100, random_state=42)
+    grid_search = GridSearchCV(rf, param_grid, cv=5, scoring="neg_root_mean_squared_error", n_jobs=-1)
+    grid_search.fit(X_train, y_train)
+
+    # Best model
+    best_model = grid_search.best_estimator_
+    y_pred = best_model.predict(X_test)
+
+    # Evaluate
+    r2 = r2_score(y_test, y_pred)
+    rmse = mean_squared_error(y_test, y_pred)
+
+    rf_city_results.append({
+        "City": city_col.replace("city_", ""),
+        "R²": round(r2, 3),
+        "RMSE": round(rmse, 2),
+        "Best Params": grid_search.best_params_
+    })
+
+# Display final results
+rf_results_df = pd.DataFrame(rf_city_results).sort_values("R²", ascending=False)
+print("\n Per-City Tuned Random Forest Results:")
+print(rf_results_df.to_string(index=False))
+
+```
+**Inference:**
+Random Forest is the best-performing model in this study, offering a strong balance between accuracy and interpretability. With city-specific tuning, it adapts well to varying market conditions and listing characteristics, making it an ideal choice for price prediction in heterogeneous, real-world datasets like Airbnb.
+
+
+#### K-Means Clustering
+Clustering the listings based on amenities! I used K-Means clustering to group Airbnb listings based on amenity richness and location features. The aim was to uncover distinct segments of listings that might reflect different pricing tiers
+Let's see the distrubution of amenities per listing before that.
+
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+df['amenities_count'] = df['amenities'].apply(lambda x: len(str(x).split(',')))
+X = df[['amenities_count']]
+sns.histplot(df['amenities_count'], bins=30)
+plt.title("Distribution of Amenities per Listing")
+plt.xlabel("Amenities Count")
+plt.ylabel("Number of Listings")
+plt.show()
+```
+#### Elbow Method to find K:
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# Elbow Method
+inertia = []
+K = range(1, 11)
+
+for k in K:
+    kmeans = KMeans(n_clusters=k, random_state=42)
+    kmeans.fit(X_scaled)
+    inertia.append(kmeans.inertia_)
+
+plt.plot(K, inertia, marker='o')
+plt.title("Elbow Method for Optimal k")
+plt.xlabel("Number of clusters")
+plt.ylabel("Inertia")
+plt.show()
+
+```
+Visualization of Cluster wise amenities Distribution:
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+X = df[['amenities_count']]
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# Step 2: Fit KMeans (e.g., with 3 clusters)
+kmeans = KMeans(n_clusters=3, random_state=42)
+df['amenity_cluster'] = kmeans.fit_predict(X_scaled)
+df.groupby('amenity_cluster')['amenities_count'].describe()
+
+```
+```{python}
+# Choose k = 3 based on elbow
+
+
+plt.figure(figsize=(8, 5))
+sns.boxplot(data=df, x='amenity_cluster', y='amenities_count', palette='Set2')
+plt.title("Amenities Count per Cluster")
+plt.xlabel("Amenity Cluster")
+plt.ylabel("Number of Amenities")
+plt.show()
+
+
+
+``` 
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+g = sns.FacetGrid(df, col="amenity_cluster", height=4, aspect=1.2)
+g.map_dataframe(sns.histplot, x="amenities_count", bins=30, kde=True, color='skyblue')
+g.set_axis_labels("Amenities Count", "Listings")
+g.set_titles("Cluster {col_name}")
+plt.suptitle("Distribution of Amenities in Each Cluster", y=1.05)
+plt.tight_layout()
+plt.show()
+
+```
+**Cluster Characteristics:**
+
+Cluster 0: Low-amenity listings (likely budget options)
+
+Cluster 1: Medium-amenity, average-tier properties
+
+Cluster 2: High-amenity listings (possibly premium or luxury)
+
+##### Using PCA: 
+
+The selected features are scaled to standardize units (StandardScaler).
+PCA was applied to transform the data to 2 components (PC1, PC2).
+KMeans clustering was run for k=3, k=4, and k=5 to compare clustering structure.Each result was visualized using a scatterplot of PC1 vs PC2, with different colors for each cluster
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+df['amenities_count'] = df['amenities'].apply(lambda x: len(str(x).split(',')))
+
+# --- Select & Scale Features ---
+features = ['price', 'latitude', 'longitude', 'amenities_count']
+df_filtered = df[features].dropna()
+X = df_filtered.copy()
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# --- Apply PCA (2D Projection) ---
+pca = PCA(n_components=2)
+X_pca = pca.fit_transform(X_scaled)
+pca_df = pd.DataFrame(X_pca, columns=['PC1', 'PC2'])
+
+# --- Cluster and Plot for k = 3, 4, 5 ---
+fig, axs = plt.subplots(1, 3, figsize=(18, 5))
+
+for i, k in enumerate([3, 4, 5]):
+    kmeans = KMeans(n_clusters=k, random_state=42)
+    cluster_labels = kmeans.fit_predict(X_scaled)
+
+    sns.scatterplot(
+        x=pca_df['PC1'],
+        y=pca_df['PC2'],
+        hue=cluster_labels,
+        palette='tab10',
+        ax=axs[i],
+        legend=False,
+        s=40,
+        alpha=0.7
+    )
+    axs[i].set_title(f'KMeans Clustering (k={k})')
+    axs[i].set_xlabel('Principal Component 1')
+    axs[i].set_ylabel('Principal Component 2')
+
+plt.suptitle("KMeans Clustering Comparison for k = 3, 4, 5", y=1.02, fontsize=16)
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| code-fold: true
+#| code-summary: "Show Code"
+kmeans = KMeans(n_clusters=6, random_state=42)
+df_clusters = df.copy()
+df_clusters['cluster'] = kmeans.fit_predict(X_scaled)
+pd.crosstab(df_clusters['city'], df_clusters['cluster'])
+pca = PCA(n_components=2)
+X_pca = pca.fit_transform(X_scaled)
+
+pca_df = pd.DataFrame(X_pca, columns=['PC1', 'PC2'])
+pca_df['cluster'] = df_clusters['cluster']
+pca_df['city'] = df_clusters['city']
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=pca_df, x='PC1', y='PC2', hue='cluster', style='city', palette='tab10')
+plt.title('KMeans Market Segments (k=6) across Cities')
+plt.xlabel('Principal Component 1')
+plt.ylabel('Principal Component 2')
+plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.tight_layout()
+plt.show()
+
+```
+
+### Conclusions:
+Pricing Drivers:
+Features such as number of bedrooms, accommodates, review scores, and availability windows strongly influence listing price. City-wise differences also play a major role in pricing behavior.
+
+Modeling Insights:
+
+Lasso Regression was useful for identifying key predictors with regularization.
+
+Random Forest delivered the highest accuracy (lowest RMSE and highest R²), outperforming both linear and non-linear baselines.
+
+City-level models revealed that local market characteristics matter, and tuning per city improved prediction accuracy.
+
+Clustering Discoveries:
+K-Means clustering revealed meaningful listing segments based on amenities, price, and location. These insights can guide hosts in differentiating their offerings and platforms in tailoring search or recommendation features.
+
+Data Quality & Preprocessing:
+Outlier removal, feature engineering, and proper encoding were crucial for improving model performance and stability.
