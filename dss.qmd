@@ -120,7 +120,7 @@ saved_paths
 ```
 
 ### Data preprocessing
-1) I have encoded categorical features
+1) I have encoded categorical features. Categorical variables like room_type, neighbourhood, and property_type were one-hot encoded. 
 ```{python}
 #| code-fold: true
 #| code-summary: "Show Code"
@@ -142,7 +142,7 @@ datasets_encoded['LA'].columns.tolist()[:20]
 ```
 
 ### Handling Outliers
-Outliers are removed using Interquartile Range
+ Outliers in price, bedrooms, and bathrooms were removed using the Interquartile Range method. Listings outside 1.5×IQR from Q1 and Q3 were filtered out. This helped me reduced skew and improve model stability.
 ```{python}
 #| code-fold: true
 #| code-summary: "Show Code"
@@ -186,7 +186,7 @@ df.head()
 **Visualization 1: Price Distribution for overall dataset(All cities)** 
 
 
-The histogram shows the overall distribution of Airbnb listing prices across all cities. Most listings are concentrated below $500, with a sharp right-skew indicating a long tail of higher-priced properties. To reduce distortion from extreme values, the x-axis is capped at $1000. This reveals that the majority of listings fall within a moderate price range, making it more interpretable.
+The below histogram shows the overall distribution of Airbnb listing prices across all cities. From this, I inferred they are all concentrated below $500, with a sharp right-skew indicating a long tail of higher-priced properties. To reduce this distortion from extreme values, I capped the x-axis at $1000. This reveals that the majority of listings fall within a moderate price range, making it more interpretable.
 ```{python}
 #| code-fold: true
 #| code-summary: "Show Code"
@@ -199,7 +199,7 @@ plt.show()
 ```
 **Visualization 2: City Based visualization for Prize Distribution** 
 
-The boxplot compares the price distributions across individual cities. San Francisco and Los Angeles exhibit higher median prices and wider interquartile ranges, indicating more variability and a higher overall cost of listings. In contrast, cities like Salem and Portland show tighter distributions and lower medians, reflecting more budget-friendly markets. Outliers are present in all cities, especially in high-demand urban areas, and should be handled carefully during modeling.
+I used boxplot to compare the price distributions across individual cities. San Francisco and Los Angeles exhibit higher median prices and wider interquartile ranges, indicating more variability and a higher overall cost of listings. In contrast, we can see that cities like Salem and Portland show tighter distributions and lower medians, reflect more budget-friendly markets. 
 ```{python}
 #| code-fold: true
 #| code-summary: "Show Code"
@@ -220,7 +220,7 @@ plt.show()
 
 **Visualization 3: Comparison of Price vs Accomodates** 
 
-This boxplot explores how listing prices vary with the number of guests a property can accommodate, focusing on listings that host up to 10 guests.
+Again, I used boxplot to see how listing prices vary with the number of guests a property can accommodate, focusing on listings that host up to 10 guests.
 
 We observe a clear upward trend in median price as the number of accommodated guests increases. Listings that can host more people typically charge higher prices, which aligns with expectations — larger properties often offer more space, amenities, or multiple rooms.
 ```{python}
@@ -248,7 +248,7 @@ plt.show()
 
 This scatter plot examines the relationship between listing price and review scores across all cities.
 
-We observe that most listings cluster between review scores of 80 and 100, with prices primarily concentrated below $500. While higher review scores may suggest better listing quality, there is no strong linear relationship between review scores and price. High-priced listings exist across all score ranges, and high review scores are not exclusive to expensive listings.
+We could observe that most listings cluster between review scores of 80 and 100, with prices primarily concentrated below $500. While higher review scores may suggest better listing quality, there is no strong linear relationship between review scores and price. Thus, I infer that high-priced listings exist across all score ranges, and high review scores are not exclusive to expensive listings.
 ```{python}
 #| code-fold: true
 #| code-summary: "Show Code"
@@ -298,15 +298,8 @@ These outliers can distort the distribution and influence model performance, so 
 
 ### Preparing Engineered data for Models 
 
-Columns (mostly numerical required for regression models to predict price)
+Columns (mostly numerical required for regression models to predict price). I believe cleaning this data and getting a feature-engineered dataset could significantly improve model readiness by removing noisy or skewed data points.
 
-This cleaned and feature-engineered dataset significantly improves model readiness by:
-
-Removing noisy or skewed data points
-
-Capturing meaningful business logic (e.g., shared vs. private rooms)
-
-Creating derived features that may improve prediction power
 ```{python}
 #| code-fold: true
 #| code-summary: "Show Code"
@@ -343,7 +336,7 @@ df1
 
 
 **Correlation**
-Finding the correlation between the features
+Finding the correlation between the features.
 ```{python}
 #| code-fold: true
 #| code-summary: "Show Code"
@@ -393,7 +386,7 @@ for city_col in city_cols:
 
 
 ```
-From this, we can infer that bedrooms, reviews are highly correlated with other features. However, the strength and nature of these relationships vary across cities, suggesting that a one-size-fits-all pricing model may not be optimal. Understanding city-specific correlations is key to building more accurate, localized predictive models.
+From this, I see that bedrooms, reviews are highly correlated with other features. However, the strength and nature of these relationships vary across cities. This suggests that a one-size-fits-all pricing model may not be optimal. This made me realize city-specific correlations is key to building more accurate, localized predictive models.
 
 ##### Datatypes
 ```{python}
@@ -783,7 +776,7 @@ print(rf_results_df.to_string(index=False))
 
 ```
 **Inference:**
-Random Forest is the best-performing model in this study, offering a strong balance between accuracy and interpretability. With city-specific tuning, it adapts well to varying market conditions and listing characteristics, making it an ideal choice for price prediction in heterogeneous, real-world datasets like Airbnb.
+Out of everything, random Forest is the best-performing model in this project. It offers a strong balance between accuracy and interpretability. By using city-specific tuning, it adapts well to varying market conditions and listing characteristics, making it an ideal choice for price prediction in heterogeneous, real-world datasets like Airbnb.
 
 
 #### K-Means Clustering
@@ -874,8 +867,7 @@ Cluster 2: High-amenity listings (possibly premium or luxury)
 
 ##### Using PCA: 
 
-The selected features are scaled to standardize units (StandardScaler).
-PCA was applied to transform the data to 2 components (PC1, PC2).
+I used the selected features and scaled them to standardize units (StandardScaler). Later, I applied PCA to transform the data to 2 components (PC1, PC2). Because PCA helps visualize and better separate the clusters.
 KMeans clustering was run for k=3, k=4, and k=5 to compare clustering structure.Each result was visualized using a scatterplot of PC1 vs PC2, with different colors for each cluster
 ```{python}
 #| code-fold: true
@@ -946,19 +938,19 @@ plt.show()
 ```
 
 ### Conclusions:
-Pricing Drivers:
-Features such as number of bedrooms, accommodates, review scores, and availability windows strongly influence listing price. City-wise differences also play a major role in pricing behavior.
+**Pricing Drivers:**
+From this analyisi, we can see that the features such as number of bedrooms, accommodates, review scores, and availability windows strongly influence listing price. Also, City-wise differences also play a major role in pricing behavior.
 
-Modeling Insights:
+**Modeling Insights:**
 
-Lasso Regression was useful for identifying key predictors with regularization.
+First, Lasso Regression was useful for identifying key predictors with regularization.
 
-Random Forest delivered the highest accuracy (lowest RMSE and highest R²), outperforming both linear and non-linear baselines.
+KNN was okayish but Random Forest delivered the highest accuracy (lowest RMSE and highest R²), outperforming both linear and non-linear baselines.
 
-City-level models revealed that local market characteristics matter, and tuning per city improved prediction accuracy.
+City-level models revealed that tuning per city improved prediction accuracy.
 
-Clustering Discoveries:
+**Clustering Discoveries:**
 K-Means clustering revealed meaningful listing segments based on amenities, price, and location. These insights can guide hosts in differentiating their offerings and platforms in tailoring search or recommendation features.
 
-Data Quality & Preprocessing:
+**Data Quality & Preprocessing:**
 Outlier removal, feature engineering, and proper encoding were crucial for improving model performance and stability.
